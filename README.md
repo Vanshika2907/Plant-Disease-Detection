@@ -1,219 +1,262 @@
-# Plant Disease Detection from Leaf Images
+# Plant Disease Detection Using Deep Learning
 
-A deep learning system that classifies 38 plant disease categories across 14 crop species from leaf photographs. Built with PyTorch using transfer learning on MobileNetV2, trained on 35,000+ images from the PlantVillage dataset, and deployed as an interactive Streamlit web application with Grad-CAM visual explanations.
+A deep learning-based plant disease detection system that identifies plant diseases from leaf images using a fine-tuned MobileNetV2 model. The project combines image classification, model explainability, and a Streamlit web application to help users understand the model's predictions.
 
-**Test Accuracy: 97.29% on held-out test set**
+## 1. Project Overview
 
----
+Plant diseases can affect crop health and agricultural productivity. Early identification of visible symptoms can help farmers and other users take appropriate action.
 
-## Demo
+This project uses deep learning to classify plant leaf images into different healthy and diseased categories. A web-based application allows users to upload leaf images and view the predicted class, confidence score, and additional visual explanations.
 
-Upload any leaf photo and the app returns:
-- Predicted disease with confidence score
-- Severity rating and treatment recommendation
-- Grad-CAM heatmap showing which regions of the leaf drove the prediction
-- Top 5 class probabilities
+The system uses a **MobileNetV2 model** trained on the PlantVillage dataset and integrates Grad-CAM to visualise image regions that influence the model's predictions.
 
-![alt text](screenshot-app1.png)
+## 2. Problem Statement
 
-![alt text](screenshot-app2.png)
+Identifying plant diseases through visual inspection can be challenging, particularly when symptoms are similar across different diseases.
 
----
+The project aims to develop an image-based classification system that can recognise plant health conditions from leaf images and present the results through an accessible web application.
 
-## Results
+## 3. Project Objectives
 
-| Metric | Value |
-|--------|-------|
-| Test Accuracy | 97.29% |
-| Macro F1 Score | 0.96 |
-| Weighted F1 Score | 0.97 |
-| Number of Classes | 38 |
-| Test Set Size | 8,146 images |
+- Develop a deep learning model for plant disease classification.
+- Use transfer learning to train a MobileNetV2 model.
+- Evaluate the model using appropriate classification metrics.
+- Integrate the trained model into a Streamlit application.
+- Provide visual explanations of predictions using Grad-CAM.
+- Present disease-related information and management suggestions for supported classes.
 
-Selected per-class results:
+## 4. Dataset Description
 
-| Class | Precision | Recall | F1 |
-|-------|-----------|--------|----|
-| Blueberry healthy | 1.00 | 1.00 | 1.00 |
-| Squash Powdery mildew | 1.00 | 1.00 | 1.00 |
-| Orange Citrus greening | 0.99 | 1.00 | 1.00 |
-| Corn Common rust | 1.00 | 0.98 | 0.99 |
-| Apple Apple scab | 0.93 | 0.97 | 0.95 |
-| Tomato Late blight | 0.96 | 0.92 | 0.94 |
+The project uses the **PlantVillage dataset**, a publicly available collection of labelled plant leaf images.
 
----
-
-## Dataset
-
-**PlantVillage** — publicly available on Kaggle  
-Link: https://www.kaggle.com/datasets/abdallahalidev/plantvillage-dataset
-
-| Property | Value |
-|----------|-------|
-| Total images | 35,689 |
-| Classes | 38 |
+| Dataset characteristic | Description |
+|---|---|
+| Dataset | PlantVillage |
 | Crop species | 14 |
-| Input size | 224 x 224 (RGB) |
-| Class imbalance ratio | 36x (handled via weighted sampler) |
+| Classification categories | 38 |
+| Image format | RGB |
+| Input image dimensions | 224 × 224 |
+| Dataset type | Labelled leaf images |
 
-Crops: Apple, Blueberry, Cherry, Corn, Grape, Orange, Peach, Pepper, Potato, Raspberry, Soybean, Squash, Strawberry, Tomato.
+The dataset contains images representing healthy plants and different plant diseases.
 
----
+**Note:** The dataset contains an imbalance in the number of images available across different classes. Weighted sampling was used during training to help address this imbalance.
 
-## Technical Approach
+## 5. Methodology
 
-### Transfer Learning — Two-Phase Training
+The project follows these major stages:
 
-Rather than training a convolutional network from scratch, this project fine-tunes MobileNetV2 pretrained on ImageNet. The rationale is that early CNN layers already encode universal visual features — edges, textures, color gradients — that transfer well to leaf disease patterns.
+1. **Data preparation:** Load the dataset, organise image classes, and prepare images for model training.
+2. **Preprocessing:** Resize images to 224 × 224 pixels, apply augmentation, and normalise image values.
+3. **Model development:** Use MobileNetV2 with transfer learning for image classification.
+4. **Model training:** Train the classification head and subsequently fine-tune selected layers of the backbone.
+5. **Evaluation:** Assess performance using accuracy, precision, recall, and F1-score.
+6. **Application integration:** Integrate the trained model into a Streamlit application.
+7. **Explainability:** Use Grad-CAM to visualise image regions influencing predictions.
 
-**Phase 1 — Head training (epochs 1–10)**  
-The entire backbone is frozen. Only the new classification head is trained using Adam with a learning rate of 1e-3. This rapidly adapts the output layer to the 38-class problem without disturbing the pretrained features.
+## 6. Model Development and Training
 
-**Phase 2 — Selective fine-tuning (epochs 11–20)**  
-The last two backbone blocks are unfrozen. Training resumes with a differential learning rate: 1e-5 for the backbone and 1e-4 for the head. This refines the higher-level feature representations for plant-specific patterns while preserving the low-level ImageNet features in earlier layers.
+### MobileNetV2
 
-This two-phase approach consistently outperforms training the full network end-to-end from the start, especially on datasets of this size.
+MobileNetV2 is a lightweight convolutional neural network designed for efficient image processing. It uses depthwise separable convolutions and inverted residual blocks to reduce computational requirements.
 
-### Handling Class Imbalance
+In this project, transfer learning was used. The pretrained MobileNetV2 network served as the feature extraction backbone, with a custom classification head adapted for the 38 plant disease categories.
 
-The dataset has a 36x imbalance (Soybean healthy: 5,090 images vs Potato healthy: 152 images). A WeightedRandomSampler is used during training so that each class is sampled with equal probability per epoch, regardless of its actual size. Without this, the model would see majority classes far more often and develop biased decision boundaries.
+### Training Strategy
+
+Training was performed in two phases:
+
+| Phase | Epochs | Training approach |
+|---|---:|---|
+| Phase 1 | 1–10 | Frozen backbone; train the classification head |
+| Phase 2 | 11–20 | Fine-tune the last two backbone blocks and classification head |
+
+**Optimisation settings:**
+
+- Phase 1 learning rate: `1e-3`
+- Phase 2 backbone learning rate: `1e-5`
+- Phase 2 classification head learning rate: `1e-4`
+- Optimiser: Adam
+- Class balancing: WeightedRandomSampler
 
 ### Data Augmentation
 
-Applied during training only:
-- Random resized crop (scale 0.8–1.0)
-- Random horizontal and vertical flip
-- Random rotation up to 15 degrees
-- Color jitter (brightness, contrast, saturation, hue)
-- ImageNet normalization
+The following transformations were used during training:
 
-Validation and test sets use only resize, center crop, and normalization — no augmentation.
+- Random resized cropping
+- Horizontal flipping
+- Vertical flipping
+- Rotation up to 15 degrees
+- Colour jitter
+- ImageNet normalisation
 
-### Grad-CAM
+These transformations help the model learn from variations in leaf appearance and image orientation.
 
-Gradient-weighted Class Activation Mapping (Grad-CAM) visualizes which spatial regions of the input image most influenced the prediction. Gradients from the final convolutional layer are pooled and used to weight the activation maps, producing a heatmap overlaid on the original image. This makes the model's reasoning interpretable without modifying the architecture.
+## 7. Results and Performance Evaluation
 
----
+The trained model achieved the following results on the test dataset:
 
-## Project Structure
+| Evaluation metric | Result |
+|---|---:|
+| Test Accuracy | 97.29% |
+| Macro F1-score | 0.96 |
+| Weighted F1-score | 0.97 |
+| Number of classes | 38 |
+| Test images | 8,146 |
 
-```
-plant-disease-detection/
-├── data/
-│   └── PlantVillage/           # 38 class folders (not tracked in git)
+### Performance Metrics
+
+- **Accuracy:** Measures the proportion of correctly classified test images.
+- **Precision:** Measures how many images predicted as a particular class actually belong to that class.
+- **Recall:** Measures how many actual images of a class were correctly identified.
+- **F1-score:** Combines precision and recall into a single metric.
+
+The macro F1-score gives equal importance to each class, while the weighted F1-score accounts for the number of samples in each class.
+
+## 8. Web Application
+
+The trained model is integrated into a web application built using Streamlit.
+
+### Application Features
+
+- **Image Upload:** Upload a plant leaf image for classification.
+- **Disease Prediction:** Display the predicted plant condition.
+- **Confidence Score:** Display the model's softmax confidence score.
+- **Top-5 Predictions:** Show the five highest-scoring predicted classes.
+- **Disease Information:** Display available descriptions and management suggestions for supported classes.
+- **Severity Information:** Display predefined severity categories for supported classes.
+- **Grad-CAM Visualisation:** Display visual explanations of the model's predictions.
+
+### Application Screenshots
+
+Add your application screenshots below.
+
+**Screenshot 1 – Main Application**
+
+![Main Application](screenshot-app1.png)
+
+**Screenshot 2 – Prediction and Results**
+
+![Prediction Results](screenshot-app2.png)
+
+## 9. Model Explainability Using Grad-CAM
+
+Grad-CAM (Gradient-weighted Class Activation Mapping) is an explainability technique used to visualise image regions that contribute to a model's prediction.
+
+In this project, Grad-CAM provides three visual outputs:
+
+1. **Original Image:** The uploaded plant leaf image.
+2. **Heatmap:** Highlights regions that contribute to the prediction.
+3. **Overlay:** Combines the heatmap with the original image.
+
+These visualisations help users inspect which parts of the leaf image influenced the model's output.
+
+Grad-CAM provides an indication of model attention; it does not prove that the highlighted regions correspond to the biological cause of a disease.
+
+## 10. Technologies Used
+
+| Technology | Purpose |
+|---|---|
+| Python | Main programming language |
+| PyTorch | Deep learning framework |
+| MobileNetV2 | Image classification model |
+| Torchvision | Image transformations and pretrained models |
+| NumPy | Numerical operations |
+| Matplotlib | Visualisation |
+| Grad-CAM | Model explainability |
+| Streamlit | Web application |
+| Git and GitHub | Version control and project hosting |
+
+## 11. Project Structure
+
+```text
+Plant-Disease-Detection/
+│
 ├── models/
-│   ├── mobilenetv2_best.pth    # Trained model weights
-│   └── class_mapping.json      # Index to class name mapping
+│   ├── class_mapping.json
+│   └── mobilenetv2_best.pth
+│
 ├── outputs/
-│   ├── 01_class_distribution.png
-│   ├── 02_plant_summary.png
-│   ├── 03_imbalance_analysis.png
-│   ├── 04_sample_images.png
-│   ├── 05_disease_distribution.png
-│   ├── training_curves_mobilenetv2.png
-│   ├── confusion_matrix_mobilenetv2.png
-│   ├── gradcam_mobilenetv2.png
-│   └── classification_report.txt
 ├── src/
-│   ├── config.py               # Hyperparameters and paths
-│   ├── dataset.py              # Data pipeline, augmentation, weighted sampler
-│   ├── model.py                # MobileNetV2 and ResNet-50 definitions
-│   ├── train.py                # Two-phase training loop
-│   ├── evaluate.py             # Test evaluation, confusion matrix, Grad-CAM
-│   └── eda.py                  # Exploratory data analysis
 ├── streamlit_app/
-│   └── app.py                  # Inference web application
-├── PlantDisease_Training.ipynb # Google Colab training notebook
+├── venv/
+│
+├── .gitignore
+├── download_data.py
+├── LICENSE
+├── PlantDisease_Training.ipynb
+├── README.md
 ├── requirements.txt
-└── README.md
-```
+├── screenshot-app1.png
+└── screenshot-app2.png
 
----
+## 12. Installation and Execution
 
-## Quickstart
+### Prerequisites
 
-### 1. Clone and install
+- Python installed on your system.
+- Git installed on your system.
+
+### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/plant-disease-detection.git
-cd plant-disease-detection
+git clone https://github.com/Vanshika2907/Plant-Disease-Detection.git
+cd Plant-Disease-Detection
+```
+
+### Step 2: Install Dependencies
+
+```bash
 pip install -r requirements.txt
 ```
 
-### 2. Get the dataset
+### Step 3: Run the Streamlit Application
 
-Download from Kaggle: https://www.kaggle.com/datasets/abdallahalidev/plantvillage-dataset  
-Extract the `color/` subfolder and place it at `data/PlantVillage/` so that the 38 class folders sit directly inside it.
-
-### 3. Run exploratory data analysis
+Run the following command from the project root directory:
 
 ```bash
-python -m src.eda
+python -m streamlit run streamlit_app/app.py
 ```
 
-Generates five plots in `outputs/` covering class distribution, healthy vs diseased breakdown, imbalance statistics, sample images, and disease proportions.
+The application will open in your browser.
 
-### 4. Train
+## 13. Live Application
 
-Training is recommended on a GPU. The included Colab notebook (`PlantDisease_Training.ipynb`) handles the full pipeline on a free T4 GPU.
+The project is deployed using Streamlit Community Cloud.
 
-```bash
-python -m src.train --model mobilenetv2 --epochs 20
-```
+**Live Demo:** https://plant-disease-detection-bio.streamlit.app/
 
-Or open `PlantDisease_Training.ipynb` in Google Colab, enable the T4 GPU runtime, and run all cells. Training takes approximately 30–45 minutes.
+## 14. Limitations
 
-### 5. Evaluate
+- The model was trained and evaluated using the PlantVillage dataset. Its performance on real-world field images may differ.
+- The model's confidence score is not a guarantee that a prediction is correct.
+- Disease descriptions and severity categories are predefined application information, not outputs independently generated by the trained model.
+- Detailed disease information is currently available only for supported classes.
+- Grad-CAM visualisations indicate influential image regions but do not establish biological causation.
+- The application should be treated as an educational and decision-support tool, not a replacement for professional plant disease diagnosis.
 
-```bash
-python -m src.evaluate --model mobilenetv2
-```
+## 15. Future Scope
 
-Outputs a classification report, normalized confusion matrix, and Grad-CAM visualizations to `outputs/`.
+- Expand disease information to cover all 38 classification categories.
+- Test the model using real-world images captured under different lighting and environmental conditions.
+- Explore additional architectures and compare their performance.
+- Improve severity assessment using image-based analysis.
+- Explore mobile application integration.
+- Investigate model optimisation for deployment on resource-constrained devices.
 
-### 6. Run the web app
+## 16. Development Approach and Codebase Attribution
 
-```bash
-streamlit run streamlit_app/app.py
-```
+This project was developed using an existing open-source repository as its starting framework.
 
-Opens at http://localhost:8501. Requires `models/mobilenetv2_best.pth` and `models/class_mapping.json` to be present.
+**Original Repository:** [moadil65/Plant-Disease-Detection](https://github.com/moadil65/Plant-Disease-Detection)
 
----
+The team independently carried out the model training and evaluation process using the PlantVillage dataset and MobileNetV2 architecture. The existing Streamlit application was modified and customised to integrate the trained model and present its predictions, disease-related information, and Grad-CAM visualisations.
 
-## Tech Stack
+The original repository is acknowledged for providing the initial project framework. The modifications and project-specific model development were carried out as part of this university project.
+## 17. References
 
-| Component | Library |
-|-----------|---------|
-| Deep learning | PyTorch 2.0, torchvision |
-| Model architecture | MobileNetV2 (pretrained on ImageNet) |
-| Data splitting | scikit-learn |
-| Visualization | matplotlib, seaborn, OpenCV |
-| Web deployment | Streamlit |
-| Training environment | Google Colab (T4 GPU) |
-
----
-
-## Model Architecture
-
-MobileNetV2 with a custom classification head:
-
-```
-MobileNetV2 backbone (pretrained on ImageNet)
-    └── features[0..18]  — frozen in Phase 1, last 2 blocks unfrozen in Phase 2
-Custom head:
-    Dropout(0.3)
-    Linear(1280 → 512)
-    ReLU
-    Dropout(0.2)
-    Linear(512 → 38)
-```
-
-Total parameters: 2,899,238  
-Trainable after Phase 2 unfreezing: 1,561,446 (53.9%)
-
----
-
-## License
-
-MIT
+1. Hughes, D. P., & Salathé, M. (2015). *An open access repository of images on plant health to enable the development of mobile disease diagnostics*. arXiv:1511.08060.
+2. Sandler, M., et al. (2018). *MobileNetV2: Inverted Residuals and Linear Bottlenecks*. Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition.
+3. Selvaraju, R. R., et al. (2017). *Grad-CAM: Visual Explanations from Deep Networks via Gradient-Based Localization*.
+4. PyTorch Documentation: https://pytorch.org/docs/
+5. Streamlit Documentation: https://docs.streamlit.io/
