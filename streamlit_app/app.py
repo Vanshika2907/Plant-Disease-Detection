@@ -303,40 +303,62 @@ def main():
             st.markdown("- Avoid blurry or heavily shadowed images")
         return
 
+    
     # Run prediction
     with st.spinner("Analyzing leaf..."):
         results, input_tensor = predict(model, image, idx_to_class, device)
 
     top = results[0]
+
+    # Get disease information
+    condition_key = (
+        top["class_name"].split("___")[1]
+        if "___" in top["class_name"]
+        else top["condition"]
+    )
+
+    info = DISEASE_INFO.get(condition_key)
+
+
     
-
-    # Get disease info — try exact match then fallback
-    condition_key = top["class_name"].split("___")[1] if "___" in top["class_name"] else top["condition"]
-    info = DISEASE_INFO.get(condition_key, DISEASE_INFO.get("healthy"))
-
     with col2:
         st.subheader("Diagnosis")
-
-        # Severity badge color
-        sev_colors = {"None": "🟢", "Moderate": "🟡", "Moderate-High": "🟠", "High": "🔴", "Very High": "🔴"}
-        sev_icon   = sev_colors.get(info["severity"], "⚪")
 
         # Result card
         st.markdown(f"### {top['plant']} — {top['condition']}")
 
         m1, m2 = st.columns(2)
-        m1.metric("Confidence",  f"{top['probability']:.1%}")
-        m2.metric("Severity",    f"{sev_icon} {info['severity']}")
+        m1.metric("Confidence", f"{top['probability']:.1%}")
 
-        st.markdown(f"**Description:** {info['description']}")
-        st.markdown(f"**Recommendation:** {info['recommendation']}")
+        if info:
+            sev_colors = {
+                "None": "🟢",
+                "Moderate": "🟡",
+                "Moderate-High": "🟠",
+                "High": "🔴",
+                "Very High": "🔴"
+            }
+            sev_icon = sev_colors.get(info["severity"], "⚪")
 
+            m2.metric("Severity", f"{sev_icon} {info['severity']}")
+            st.markdown(f"**Description:** {info['description']}")
+            st.markdown(f"**Recommendation:** {info['recommendation']}")
+
+        else:
+            m2.metric("Severity", "Not available")
+            st.info(
+                "Detailed disease information is not available for this "
+                "predicted class. Please consult a plant disease specialist "
+                "for further guidance."
+            )
+
+        # Top 5 Predictions
         st.markdown("---")
         st.markdown("#### Top 5 Predictions")
 
         fig, ax = plt.subplots(figsize=(7, 2.8))
         labels = [f"{r['plant']} — {r['condition']}" for r in results]
-        probs  = [r['probability'] for r in results]
+        probs = [r['probability'] for r in results]
         colors = ['#2ecc71' if i == 0 else '#bdc3c7' for i in range(len(labels))]
         ax.barh(range(len(labels)), probs, color=colors, edgecolor='white')
         ax.set_yticks(range(len(labels)))
@@ -349,21 +371,24 @@ def main():
         st.pyplot(fig)
         plt.close()
 
-    # Grad-CAM
+        
+    # Grad-CAM - Full width section below both columns
     if show_gradcam:
         st.markdown("---")
         st.subheader("Grad-CAM — What the Model Sees")
 
         pred_idx = int([k for k, v in idx_to_class.items() if v == top["class_name"]][0])
-        cam      = generate_gradcam(model, input_tensor, model_name, pred_idx)
+        cam = generate_gradcam(model, input_tensor, model_name, pred_idx)
 
-        img_rsz  = image.resize((IMG_SIZE, IMG_SIZE))
-        heatmap  = plt.cm.jet(cam)[:, :, :3]
-        overlay  = (0.5 * np.array(img_rsz) / 255.0 + 0.5 * heatmap).clip(0, 1)
+        img_rsz = image.resize((IMG_SIZE, IMG_SIZE))
+        heatmap = plt.cm.jet(cam)[:, :, :3]
+        overlay = (0.5 * np.array(img_rsz) / 255.0 + 0.5 * heatmap).clip(0, 1)
 
         gc1, gc2, gc3 = st.columns(3)
+
         with gc1:
             st.image(img_rsz, caption="Original", use_container_width=True)
+
         with gc2:
             fig2, ax2 = plt.subplots()
             ax2.imshow(cam, cmap='jet')
@@ -371,8 +396,13 @@ def main():
             ax2.set_title("Attention Map", fontsize=9)
             st.pyplot(fig2)
             plt.close()
+
         with gc3:
-            st.image((overlay * 255).astype(np.uint8), caption="Overlay", use_container_width=True)
+            st.image(
+                (overlay * 255).astype(np.uint8),
+                caption="Overlay",
+                use_container_width=True
+            )
 
         st.caption(
             "🔴 Red/yellow = regions the model focused on most for this prediction. "
