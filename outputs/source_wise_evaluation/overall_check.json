@@ -1,0 +1,7 @@
+{
+  "test_images": 12806,
+  "accuracy": 0.945884741527409,
+  "macro_f1": 0.9108995834716543,
+  "weighted_f1": 0.9484671024127329,
+  "note": "Source-wise metrics describe performance on sources represented in the existing test split. They do not measure generalisation to a wholly unseen source."
+}

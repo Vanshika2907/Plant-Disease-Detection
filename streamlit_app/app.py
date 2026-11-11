@@ -133,25 +133,18 @@ DISEASE_INFO = {
 }
 
 
-# Model Builder
+
+# ============================================================
+# MODEL BUILDER
+# ============================================================
+
 def build_mobilenetv2(num_classes):
     model = models.mobilenet_v2(weights=None)
-    in_f  = model.classifier[1].in_features
+    in_features = model.classifier[1].in_features
+
     model.classifier = nn.Sequential(
         nn.Dropout(0.3),
-        nn.Linear(in_f, 512),
-        nn.ReLU(inplace=True),
-        nn.Dropout(0.2),
-        nn.Linear(512, num_classes),
-    )
-    return model
-
-def build_resnet50(num_classes):
-    model = models.resnet50(weights=None)
-    in_f  = model.fc.in_features
-    model.fc = nn.Sequential(
-        nn.Dropout(0.3),
-        nn.Linear(in_f, 512),
+        nn.Linear(in_features, 512),
         nn.ReLU(inplace=True),
         nn.Dropout(0.2),
         nn.Linear(512, num_classes),
@@ -159,158 +152,338 @@ def build_resnet50(num_classes):
     return model
 
 
-# Model Loading
+# ============================================================
+# MODEL CONFIGURATION
+# ============================================================
+
+MODEL_CONFIGS = {
+    "38-class Baseline": {
+        "model_file": "mobilenetv2_best.pth",
+        "mapping_file": "class_mapping.json",
+        "classes": 38,
+        "accuracy": "97.29%",
+        "description": "Original PlantVillage model",
+    },
+    "68-class Expanded": {
+        "model_file": "mobilenetv2_68_best.pth",
+        "mapping_file": "class_mapping_68.json",
+        "classes": 68,
+        "accuracy": "94.59%",
+        "description": "Expanded multi-dataset model",
+    },
+}
+
+
+def normalize_mapping(mapping):
+    """
+    Accept either:
+    {"0": "Apple___healthy", ...}
+    or:
+    {"Apple___healthy": 0, ...}
+
+    Return a consistent index-to-class mapping.
+    """
+    if not isinstance(mapping, dict):
+        raise ValueError("Invalid class mapping format.")
+
+    if not mapping:
+        raise ValueError("Class mapping is empty.")
+
+    first_key = next(iter(mapping))
+
+    if str(first_key).isdigit():
+        return {str(k): str(v) for k, v in mapping.items()}
+
+    return {
+        str(index): str(class_name)
+        for class_name, index in mapping.items()
+    }
+
+
+# ============================================================
+# MODEL LOADING
+# ============================================================
 
 @st.cache_resource
-def load_model(model_name):
-    model_path   = PROJECT_ROOT / "models" / f"{model_name}_best.pth"
-    mapping_path = PROJECT_ROOT / "models" / "class_mapping.json"
+def load_model(model_option):
+
+    config = MODEL_CONFIGS[model_option]
+
+    model_path = PROJECT_ROOT / "models" / config["model_file"]
+    mapping_path = PROJECT_ROOT / "models" / config["mapping_file"]
 
     if not model_path.exists():
-        return None, None, f"Model file not found: {model_path}\nMake sure you placed mobilenetv2_best.pth in the models/ folder."
+        return None, None, f"Model file not found: {model_path}"
+
     if not mapping_path.exists():
-        return None, None, f"class_mapping.json not found in models/ folder."
+        return None, None, f"Class mapping not found: {mapping_path}"
 
-    with open(mapping_path) as f:
-        idx_to_class = json.load(f)
+    try:
+        with open(mapping_path, "r", encoding="utf-8") as f:
+            raw_mapping = json.load(f)
 
-    num_classes = len(idx_to_class)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        idx_to_class = normalize_mapping(raw_mapping)
 
-    model = build_mobilenetv2(num_classes) if model_name == "mobilenetv2" else build_resnet50(num_classes)
-    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
-    model = model.to(device)
-    model.eval()
+        if len(idx_to_class) != config["classes"]:
+            raise ValueError(
+                f"Expected {config['classes']} classes, "
+                f"but mapping contains {len(idx_to_class)}."
+            )
 
-    return model, idx_to_class, None
+        device = torch.device(
+            "mps" if torch.backends.mps.is_available()
+            else "cuda" if torch.cuda.is_available()
+            else "cpu"
+        )
+
+        model = build_mobilenetv2(len(idx_to_class))
+
+        state_dict = torch.load(
+            model_path,
+            map_location=device,
+            weights_only=True
+        )
+
+        model.load_state_dict(state_dict)
+        model.to(device)
+        model.eval()
+
+        return model, idx_to_class, None
+
+    except Exception as e:
+        return None, None, f"Could not load model: {str(e)}"
 
 
-# Prediction
+# ============================================================
+# PREDICTION
+# ============================================================
+
 def predict(model, image, idx_to_class, device):
+
     transform = transforms.Compose([
         transforms.Resize(int(IMG_SIZE * 1.14)),
         transforms.CenterCrop(IMG_SIZE),
         transforms.ToTensor(),
-        transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+        transforms.Normalize(
+            mean=IMAGENET_MEAN,
+            std=IMAGENET_STD
+        ),
     ])
 
     input_tensor = transform(image).unsqueeze(0).to(device)
 
     with torch.no_grad():
         output = model(input_tensor)
-        probs  = F.softmax(output, dim=1)[0]
+        probabilities = F.softmax(output, dim=1)[0]
 
+    top_probs, top_indices = probabilities.topk(
+        min(5, len(idx_to_class))
+    )
 
-    top5_probs, top5_idx = probs.topk(5)
     results = []
-    for prob, idx in zip(top5_probs, top5_idx):
-        class_name = idx_to_class[str(idx.item())]
+
+    for probability, index in zip(top_probs, top_indices):
+
+        class_name = idx_to_class[str(index.item())]
         plant, condition = get_plant_and_condition(class_name)
+
         results.append({
-            "class_name":  class_name,
-            "plant":       plant,
-            "condition":   condition,
-            "probability": prob.item(),
+            "class_name": class_name,
+            "plant": plant,
+            "condition": condition,
+            "probability": probability.item(),
         })
 
     return results, input_tensor
 
 
-# Grad-CAM
-def generate_gradcam(model, input_tensor, model_name, pred_class_idx):
+# ============================================================
+# GRAD-CAM
+# ============================================================
+
+def generate_gradcam(model, input_tensor, pred_class_idx):
+
     model.eval()
-    target_layer = model.features[-1] if model_name == "mobilenetv2" else model.layer4[-1]
 
-    activations, gradients = [], []
-    fwd = target_layer.register_forward_hook(lambda m,i,o: activations.append(o.detach()))
-    bwd = target_layer.register_full_backward_hook(lambda m,gi,go: gradients.append(go[0].detach()))
+    target_layer = model.features[-1]
 
-    out = model(input_tensor)
-    model.zero_grad()
-    out[0, pred_class_idx].backward()
-    fwd.remove(); bwd.remove()
+    activations = []
+    gradients = []
 
-    weights = gradients[0].mean(dim=(2,3), keepdim=True)
-    cam = torch.relu((weights * activations[0]).sum(1)).squeeze().cpu().numpy()
-    cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
-    return cv2.resize(cam, (IMG_SIZE, IMG_SIZE))
+    forward_hook = target_layer.register_forward_hook(
+        lambda module, inputs, output:
+        activations.append(output.detach())
+    )
+
+    backward_hook = target_layer.register_full_backward_hook(
+        lambda module, grad_input, grad_output:
+        gradients.append(grad_output[0].detach())
+    )
+
+    try:
+        output = model(input_tensor)
+        model.zero_grad()
+
+        output[0, pred_class_idx].backward()
+
+        weights = gradients[0].mean(
+            dim=(2, 3),
+            keepdim=True
+        )
+
+        cam = torch.relu(
+            (weights * activations[0]).sum(dim=1)
+        ).squeeze().cpu().numpy()
+
+        cam = (
+            (cam - cam.min()) /
+            (cam.max() - cam.min() + 1e-8)
+        )
+
+        return cv2.resize(cam, (IMG_SIZE, IMG_SIZE))
+
+    finally:
+        forward_hook.remove()
+        backward_hook.remove()
 
 
-# UI
+# ============================================================
+# USER INTERFACE
+# ============================================================
+
 def main():
+
     st.set_page_config(
-        page_title="Plant Disease Detection",
+        page_title="Plant Health Classification",
         page_icon="🌿",
         layout="wide"
     )
 
-    # Header
-    st.title("Plant Disease Detection")
+    st.title("Plant Health Condition Classification")
+
     st.markdown(
-        "Upload a photo of a plant leaf for instant AI-powered disease diagnosis. "
-        "Trained on **35,000+ images** across **38 disease classes** and **14 crop species**."
+        "Upload a leaf image to obtain an AI-generated visual "
+        "classification of its possible health condition."
     )
 
-    # Sidebar
+    # ---------------- SIDEBAR ----------------
+
     with st.sidebar:
+
         st.header("Settings")
-        model_name   = st.selectbox("Model", ["mobilenetv2"], help="mobilenetv2 = fast & accurate")
-        show_gradcam = st.checkbox("Show Grad-CAM heatmap", value=True)
-        st.markdown("---")
-        st.markdown("### Model Stats")
-        st.markdown("- **Test Accuracy:** 97.29%")
-        st.markdown("- **Architecture:** MobileNetV2")
-        st.markdown("- **Classes:** 38")
-        st.markdown("- **Training:** Transfer learning")
-        st.markdown("---")
-        st.markdown("### Supported Crops")
-        st.markdown(
-            "Apple · Blueberry · Cherry · Corn · Grape · Orange · "
-            "Peach · Pepper · Potato · Raspberry · Soybean · Squash · "
-            "Strawberry · Tomato"
+
+        model_option = st.selectbox(
+            "Select Model",
+            list(MODEL_CONFIGS.keys()),
+            help="Choose between the original 38-class model "
+                 "and the expanded 68-class model."
         )
 
-    # Load model
-    model, idx_to_class, error = load_model(model_name)
+        show_gradcam = st.checkbox(
+            "Show Grad-CAM heatmap",
+            value=True
+        )
+
+        config = MODEL_CONFIGS[model_option]
+
+        st.markdown("---")
+        st.subheader("Model Information")
+
+        st.markdown(f"**Architecture:** MobileNetV2")
+        st.markdown(f"**Classes:** {config['classes']}")
+        st.markdown(f"**Test Accuracy:** {config['accuracy']}")
+        st.markdown(f"**Model:** {config['description']}")
+
+        st.markdown("---")
+        st.caption(
+            "Predictions are based on visual patterns in the "
+            "training datasets. They are not confirmed biological "
+            "diagnoses."
+        )
+
+    # ---------------- LOAD MODEL ----------------
+
+    model, idx_to_class, error = load_model(model_option)
+
     if error:
-        st.error(f" {error}")
+        st.error(error)
         return
 
-    num_classes = len(idx_to_class)
     device = next(model.parameters()).device
 
-    # Layout
-    col1, col2 = st.columns([1, 1], gap="large")
+    # ---------------- SUPPORTED CROPS ----------------
+
+    plants = sorted({
+        get_plant_and_condition(class_name)[0]
+        for class_name in idx_to_class.values()
+    })
+
+    # ---------------- MAIN LAYOUT ----------------
+
+    col1, col2 = st.columns(2, gap="large")
+
+    uploaded = None
+    image = None
 
     with col1:
+
         st.subheader("Upload Leaf Image")
+
         uploaded = st.file_uploader(
-            "Choose an image...",
+            "Choose an image",
             type=["jpg", "jpeg", "png"],
-            help="Upload a clear, well-lit photo of a single plant leaf"
+            help="Use a clear, well-lit image of a leaf."
         )
+
         if uploaded:
-            image = Image.open(uploaded).convert("RGB")
-            st.image(image, caption="Uploaded image", use_container_width=True)
+
+            try:
+                image = Image.open(uploaded).convert("RGB")
+
+                st.image(
+                    image,
+                    caption="Uploaded image",
+                    use_container_width=True
+                )
+
+            except Exception:
+                st.error("Could not read this image.")
+                return
 
     if not uploaded:
+
         with col2:
-            st.subheader("Diagnosis")
-            st.info("<- Upload a leaf image to get started!")
-            st.markdown("**Tips for best results:**")
-            st.markdown("- Use a clear, well-lit photo")
-            st.markdown("- Make sure the leaf fills most of the frame")
-            st.markdown("- Avoid blurry or heavily shadowed images")
+
+            st.subheader("Classification Results")
+
+            st.info("Upload a leaf image to get started.")
+
+            st.markdown("**Tips for better predictions:**")
+            st.markdown("- Use a clear, well-lit photograph.")
+            st.markdown("- Keep the leaf visible.")
+            st.markdown("- Avoid blurry images.")
+            st.markdown("- Avoid heavy shadows.")
+
+            st.markdown("---")
+            st.markdown("**Supported crops and plants**")
+
+            st.write(", ".join(plants))
+
         return
 
-    
-    # Run prediction
-    with st.spinner("Analyzing leaf..."):
-        results, input_tensor = predict(model, image, idx_to_class, device)
+    # ---------------- RUN PREDICTION ----------------
+
+    with st.spinner("Analysing image..."):
+
+        results, input_tensor = predict(
+            model,
+            image,
+            idx_to_class,
+            device
+        )
 
     top = results[0]
 
-    # Get disease information
     condition_key = (
         top["class_name"].split("___")[1]
         if "___" in top["class_name"]
@@ -319,96 +492,155 @@ def main():
 
     info = DISEASE_INFO.get(condition_key)
 
+    # ---------------- DISPLAY RESULTS ----------------
 
-    
     with col2:
-        st.subheader("Diagnosis")
 
-        # Result card
-        st.markdown(f"### {top['plant']} — {top['condition']}")
+        st.subheader("Classification Results")
 
-        m1, m2 = st.columns(2)
-        m1.metric("Confidence", f"{top['probability']:.1%}")
+        st.markdown(
+            f"### {top['plant']} — {top['condition']}"
+        )
+
+        st.metric(
+            "Prediction Confidence",
+            f"{top['probability']:.1%}"
+        )
 
         if info:
-            sev_colors = {
-                "None": "🟢",
-                "Moderate": "🟡",
-                "Moderate-High": "🟠",
-                "High": "🔴",
-                "Very High": "🔴"
-            }
-            sev_icon = sev_colors.get(info["severity"], "⚪")
 
-            m2.metric("Severity", f"{sev_icon} {info['severity']}")
             st.markdown(f"**Description:** {info['description']}")
-            st.markdown(f"**Recommendation:** {info['recommendation']}")
 
-        else:
-            m2.metric("Severity", "Not available")
             st.info(
-                "Detailed disease information is not available for this "
-                "predicted class. Please consult a plant disease specialist "
-                "for further guidance."
+                "The information below is general educational "
+                "guidance, not a confirmed diagnosis or treatment plan."
             )
 
-        # Top 5 Predictions
+            st.markdown(
+                f"**General care information:** "
+                f"{info['recommendation']}"
+            )
+
+        else:
+
+            st.info(
+                "Detailed information is not currently available "
+                "for this class. Consider consulting an agricultural "
+                "specialist for confirmation."
+            )
+
+        # ---------------- TOP 5 ----------------
+
         st.markdown("---")
         st.markdown("#### Top 5 Predictions")
 
         fig, ax = plt.subplots(figsize=(7, 2.8))
-        labels = [f"{r['plant']} — {r['condition']}" for r in results]
-        probs = [r['probability'] for r in results]
-        colors = ['#2ecc71' if i == 0 else '#bdc3c7' for i in range(len(labels))]
-        ax.barh(range(len(labels)), probs, color=colors, edgecolor='white')
+
+        labels = [
+            f"{r['plant']} — {r['condition']}"
+            for r in results
+        ]
+
+        probabilities = [
+            r["probability"] for r in results
+        ]
+
+        colors = [
+            "#2ecc71" if i == 0 else "#bdc3c7"
+            for i in range(len(labels))
+        ]
+
+        ax.barh(
+            range(len(labels)),
+            probabilities,
+            color=colors,
+            edgecolor="white"
+        )
+
         ax.set_yticks(range(len(labels)))
         ax.set_yticklabels(labels, fontsize=8)
-        ax.set_xlabel("Confidence")
+        ax.set_xlabel("Prediction probability")
         ax.set_xlim(0, 1)
         ax.invert_yaxis()
-        ax.grid(axis='x', alpha=0.3)
+        ax.grid(axis="x", alpha=0.3)
+
         plt.tight_layout()
         st.pyplot(fig)
-        plt.close()
+        plt.close(fig)
 
-        
-    # Grad-CAM - Full width section below both columns
+    # ---------------- GRAD-CAM ----------------
+
     if show_gradcam:
+
         st.markdown("---")
-        st.subheader("Grad-CAM — What the Model Sees")
+        st.subheader("Grad-CAM — Model Attention Visualisation")
 
-        pred_idx = int([k for k, v in idx_to_class.items() if v == top["class_name"]][0])
-        cam = generate_gradcam(model, input_tensor, model_name, pred_idx)
+        pred_idx = next(
+            int(index)
+            for index, class_name in idx_to_class.items()
+            if class_name == top["class_name"]
+        )
 
-        img_rsz = image.resize((IMG_SIZE, IMG_SIZE))
+        with st.spinner("Generating Grad-CAM..."):
+
+            cam = generate_gradcam(
+                model,
+                input_tensor,
+                pred_idx
+            )
+
+        img_resized = image.resize((IMG_SIZE, IMG_SIZE))
+
         heatmap = plt.cm.jet(cam)[:, :, :3]
-        overlay = (0.5 * np.array(img_rsz) / 255.0 + 0.5 * heatmap).clip(0, 1)
+
+        overlay = (
+            0.5 * np.array(img_resized) / 255.0
+            + 0.5 * heatmap
+        ).clip(0, 1)
 
         gc1, gc2, gc3 = st.columns(3)
 
         with gc1:
-            st.image(img_rsz, caption="Original", use_container_width=True)
+
+            st.image(
+                img_resized,
+                caption="Original image",
+                use_container_width=True
+            )
 
         with gc2:
+
             fig2, ax2 = plt.subplots()
-            ax2.imshow(cam, cmap='jet')
-            ax2.axis('off')
-            ax2.set_title("Attention Map", fontsize=9)
+
+            ax2.imshow(cam, cmap="jet")
+            ax2.axis("off")
+            ax2.set_title("Attention map")
+
             st.pyplot(fig2)
-            plt.close()
+            plt.close(fig2)
 
         with gc3:
+
             st.image(
                 (overlay * 255).astype(np.uint8),
-                caption="Overlay",
+                caption="Grad-CAM overlay",
                 use_container_width=True
             )
 
         st.caption(
-            "🔴 Red/yellow = regions the model focused on most for this prediction. "
-            "Green/blue = low attention. Healthy leaves show diffuse attention; "
-            "diseased leaves show tight focus on lesion areas."
+            "Grad-CAM highlights image regions that contributed "
+            "to the selected prediction. It does not prove that "
+            "the model identified a disease-specific lesion."
         )
+
+    # ---------------- FOOTER ----------------
+
+    st.markdown("---")
+
+    st.caption(
+        f"Active model: {model_option} | "
+        f"Number of classes: {len(idx_to_class)}"
+    )
 
 
 if __name__ == "__main__":

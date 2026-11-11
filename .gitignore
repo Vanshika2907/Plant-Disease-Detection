@@ -18,3 +18,23 @@ venv/
 
 .DS_Store
 Thumbs.db
+# Python and notebook temporary files
+.ipynb_checkpoints/
+*.log
+
+# macOS
+.AppleDouble
+.LSOverride
+
+# Local dataset and generated temporary files
+dataset_audit/
+dataset_cleaning/
+MultiCrop_Separated/
+additional_datasets/
+
+# Local environment files
+.DS_Store
+outputs/source_wise_evaluation/source_wise_test_predictions.csv
+outputs/groundnut_sigatoka_comparison/*.csv
+outputs/groundnut_sigatoka_diagnostic/*.csv
+outputs/source_wise_evaluation/source_wise_test_predictions.csv

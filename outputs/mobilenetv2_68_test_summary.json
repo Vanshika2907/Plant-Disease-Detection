@@ -1,0 +1,8 @@
+{
+    "model": "MobileNetV2",
+    "num_classes": 68,
+    "test_images": 12806,
+    "test_accuracy": 0.945884741527409,
+    "macro_f1": 0.9108995834716543,
+    "weighted_f1": 0.9484671024127329
+}
