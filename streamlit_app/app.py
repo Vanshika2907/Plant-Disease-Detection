@@ -23,115 +23,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.config import IMG_SIZE, IMAGENET_MEAN, IMAGENET_STD, get_plant_and_condition
 
 
-# Disease Info
-DISEASE_INFO = {
-    "healthy": {
-        "severity": "None", "color": "green",
-        "description": "The leaf appears healthy with no visible signs of disease.",
-        "recommendation": "Continue regular care — proper watering, fertilization, and monitoring."
-    },
-    "Apple_scab": {
-        "severity": "Moderate", "color": "orange",
-        "description": "Fungal disease causing dark, scabby lesions on leaves and fruit.",
-        "recommendation": "Apply fungicide (captan or myclobutanil). Remove fallen leaves. Ensure good air circulation."
-    },
-    "Black_rot": {
-        "severity": "High", "color": "red",
-        "description": "Fungal infection causing dark, circular lesions that expand concentrically.",
-        "recommendation": "Prune infected areas. Apply copper-based fungicide. Remove mummified fruit."
-    },
-    "Cedar_apple_rust": {
-        "severity": "Moderate", "color": "orange",
-        "description": "Fungal disease causing bright orange spots on leaves.",
-        "recommendation": "Remove nearby cedar trees if possible. Apply fungicide in spring."
-    },
-    "Powdery_mildew": {
-        "severity": "Moderate", "color": "orange",
-        "description": "White powdery coating on leaf surfaces caused by fungal infection.",
-        "recommendation": "Improve air circulation. Apply sulfur-based or potassium bicarbonate fungicide."
-    },
-    "Cercospora_leaf_spot Gray_leaf_spot": {
-        "severity": "High", "color": "red",
-        "description": "Fungal disease causing rectangular gray-brown lesions between leaf veins.",
-        "recommendation": "Plant resistant hybrids. Apply foliar fungicide. Practice crop rotation."
-    },
-    "Common_rust_": {
-        "severity": "Moderate", "color": "orange",
-        "description": "Fungal disease causing raised, rust-colored pustules on leaves.",
-        "recommendation": "Plant resistant varieties. Apply fungicide early in season."
-    },
-    "Northern_Leaf_Blight": {
-        "severity": "High", "color": "red",
-        "description": "Fungal disease causing long, cigar-shaped gray-green lesions.",
-        "recommendation": "Use resistant varieties. Apply foliar fungicide. Rotate crops."
-    },
-    "Esca_(Black_Measles)": {
-        "severity": "Very High", "color": "red",
-        "description": "Complex fungal disease causing tiger-stripe patterns on leaves.",
-        "recommendation": "No cure available. Prune infected vines. Apply wound protectants after pruning."
-    },
-    "Leaf_blight_(Isariopsis_Leaf_Spot)": {
-        "severity": "Moderate", "color": "orange",
-        "description": "Fungal disease causing angular, reddish-brown spots on leaves.",
-        "recommendation": "Remove infected leaves. Apply mancozeb fungicide. Ensure good drainage."
-    },
-    "Haunglongbing_(Citrus_greening)": {
-        "severity": "Very High", "color": "red",
-        "description": "Bacterial disease spread by psyllids, causing mottled yellowing and misshapen fruit.",
-        "recommendation": "No cure. Control psyllid vectors. Remove infected trees to prevent spread."
-    },
-    "Bacterial_spot": {
-        "severity": "Moderate-High", "color": "orange",
-        "description": "Bacterial infection causing small, dark, water-soaked spots on leaves.",
-        "recommendation": "Apply copper-based bactericide. Avoid overhead watering. Use disease-free seeds."
-    },
-    "Early_blight": {
-        "severity": "Moderate", "color": "orange",
-        "description": "Fungal disease causing concentric ring patterns on lower leaves.",
-        "recommendation": "Apply chlorothalonil fungicide. Mulch around plants. Remove infected foliage."
-    },
-    "Late_blight": {
-        "severity": "Very High", "color": "red",
-        "description": "Devastating oomycete disease causing water-soaked lesions that rapidly destroy foliage.",
-        "recommendation": "Apply fungicide immediately (metalaxyl). Destroy infected plants. Monitor weather."
-    },
-    "Leaf_Mold": {
-        "severity": "Moderate", "color": "orange",
-        "description": "Fungal disease causing yellow patches on upper leaf surface and olive-green mold below.",
-        "recommendation": "Improve ventilation. Reduce humidity. Apply fungicide if severe."
-    },
-    "Septoria_leaf_spot": {
-        "severity": "Moderate", "color": "orange",
-        "description": "Fungal disease causing small, circular spots with dark borders and gray centers.",
-        "recommendation": "Remove infected leaves. Apply chlorothalonil. Avoid overhead irrigation."
-    },
-    "Spider_mites Two-spotted_spider_mite": {
-        "severity": "Moderate", "color": "orange",
-        "description": "Tiny arachnids causing stippled, yellowed leaves with fine webbing.",
-        "recommendation": "Spray with insecticidal soap or neem oil. Increase humidity. Use predatory mites."
-    },
-    "Target_Spot": {
-        "severity": "Moderate", "color": "orange",
-        "description": "Fungal disease causing small, dark brown spots with concentric rings.",
-        "recommendation": "Apply fungicide. Remove debris. Maintain proper plant spacing."
-    },
-    "Tomato_Yellow_Leaf_Curl_Virus": {
-        "severity": "Very High", "color": "red",
-        "description": "Viral disease causing severe leaf curling, yellowing, and stunted growth.",
-        "recommendation": "No cure. Control whitefly vectors. Remove infected plants. Use resistant varieties."
-    },
-    "Tomato_mosaic_virus": {
-        "severity": "High", "color": "red",
-        "description": "Viral disease causing mottled light/dark green patterns and leaf distortion.",
-        "recommendation": "No cure. Remove infected plants. Disinfect tools. Use resistant varieties."
-    },
-    "Leaf_scorch": {
-        "severity": "Moderate", "color": "orange",
-        "description": "Causes leaf edges to brown and curl, often spreading inward.",
-        "recommendation": "Improve watering consistency. Provide afternoon shade. Mulch to retain moisture."
-    },
-}
-
+from knowledge_base import get_knowledge
 
 
 # ============================================================
@@ -484,13 +376,9 @@ def main():
 
     top = results[0]
 
-    condition_key = (
-        top["class_name"].split("___")[1]
-        if "___" in top["class_name"]
-        else top["condition"]
-    )
-
-    info = DISEASE_INFO.get(condition_key)
+    # Use the complete crop + condition key to avoid mixing diseases
+    # that share a condition name across different crops.
+    info = get_knowledge(top["class_name"])
 
     # ---------------- DISPLAY RESULTS ----------------
 
@@ -503,30 +391,88 @@ def main():
         )
 
         st.metric(
-            "Prediction Confidence",
-            f"{top['probability']:.1%}"
+            "Top prediction softmax score",
+            f"{top['probability']:.1%}",
+            help="This is the model softmax output, not a calibrated probability or a confirmed likelihood of disease."
+        )
+        st.caption(
+            "Softmax scores indicate the model's relative output for its classes; "
+            "they are not calibrated diagnostic probabilities."
         )
 
         if info:
-
-            st.markdown(f"**Description:** {info['description']}")
-
             st.info(
-                "The information below is general educational "
-                "guidance, not a confirmed diagnosis or treatment plan."
+                "Educational decision-support information only. "
+                "The image classification is not a confirmed diagnosis."
             )
 
-            st.markdown(
-                f"**General care information:** "
-                f"{info['recommendation']}"
-            )
+            st.markdown(f"**Classification category:** {info['type'].replace('_', ' ').title()}")
 
+            st.markdown("**Visible symptoms**")
+            for item in info["symptoms"]:
+                st.write(f"- {item}")
+
+            if info["causal_agent"]:
+                st.markdown(f"**Causal agent:** {info['causal_agent']}")
+            else:
+                st.markdown("**Causal agent:** Not established in this knowledge-base entry.")
+
+            st.markdown("**Spread / transmission**")
+            for item in info["spread"]:
+                st.write(f"- {item}")
+
+            st.markdown("**General management**")
+            for item in info["management"]:
+                st.write(f"- {item}")
+
+            st.markdown("**Prevention**")
+            for item in info["prevention"]:
+                st.write(f"- {item}")
+
+            if info["nutrient_guidance"]:
+                st.markdown(f"**Nutrient guidance:** {info['nutrient_guidance']}")
+
+            st.markdown(f"**Treatment note:** {info['treatment_note']}")
+            st.caption(info["diagnostic_caution"])
+            if info["review_status"] != "VERIFIED":
+                st.warning(
+                    "Knowledge-base content is a preliminary educational draft and has not yet been fully source-verified. "
+                    "Do not use it as a standalone diagnosis or treatment instruction."
+                )
+                if info["sources"]:
+                    st.markdown("**Reference sources**")
+
+                    for source in info["sources"]:
+                        organization = source.get("organization", "Source")
+                        title = source.get("title", "Reference")
+                        url = source.get("url")
+
+                        if url:
+                            st.markdown(
+                                f"- **{organization}** — "
+                                f"[{title}]({url})"
+                            )
+                        else:
+                            st.write(f"- **{organization}** — {title}")
+
+                else:
+                    st.caption(
+                        "No independently verified references have been attached "
+                        "to this entry yet."
+                    )
+
+            if info["chemical_treatment"] is not None:
+                st.warning(
+                    "A chemical treatment entry is present. Verify the current "
+                    "Indian registration and exact product label before use."
+                )
+                st.write(info["chemical_treatment"])
+            else:
+                st.caption("No chemical treatment recommendation is provided.")
         else:
-
-            st.info(
-                "Detailed information is not currently available "
-                "for this class. Consider consulting an agricultural "
-                "specialist for confirmation."
+            st.warning(
+                "No knowledge-base entry matches this exact model class. "
+                "Please consult an agricultural specialist."
             )
 
         # ---------------- TOP 5 ----------------
