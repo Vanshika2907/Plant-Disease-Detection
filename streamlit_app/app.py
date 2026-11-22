@@ -21,7 +21,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.config import IMG_SIZE, IMAGENET_MEAN, IMAGENET_STD, get_plant_and_condition
-
+from src.four_model_factory import get_model
 
 from knowledge_base import get_knowledge
 
@@ -50,21 +50,46 @@ def build_mobilenetv2(num_classes):
 
 MODEL_CONFIGS = {
     "38-class Baseline": {
+        "architecture": "MobileNetV2",
         "model_file": "mobilenetv2_best.pth",
         "mapping_file": "class_mapping.json",
         "classes": 38,
         "accuracy": "97.29%",
         "description": "Original PlantVillage model",
     },
-    "68-class Expanded": {
+    "MobileNetV2 (68 classes)": {
+        "architecture": "MobileNetV2",
         "model_file": "mobilenetv2_68_best.pth",
         "mapping_file": "class_mapping_68.json",
         "classes": 68,
         "accuracy": "94.59%",
-        "description": "Expanded multi-dataset model",
+        "description": "Expanded dataset model",
+    },
+    "ResNet50 (68 classes)": {
+        "architecture": "ResNet50",
+        "model_file": "resnet50_68_best.pth",
+        "mapping_file": "class_mapping_68.json",
+        "classes": 68,
+        "accuracy": "97.85%",
+        "description": "Best original and external test accuracy",
+    },
+    "EfficientNetB0 (68 classes)": {
+        "architecture": "EfficientNetB0",
+        "model_file": "efficientnet_b0_68_best.pth",
+        "mapping_file": "class_mapping_68.json",
+        "classes": 68,
+        "accuracy": "94.92%",
+        "description": "EfficientNet architecture",
+    },
+    "DenseNet121 (68 classes)": {
+        "architecture": "DenseNet121",
+        "model_file": "densenet121_68_best.pth",
+        "mapping_file": "class_mapping_68.json",
+        "classes": 68,
+        "accuracy": "96.23%",
+        "description": "DenseNet architecture",
     },
 }
-
 
 def normalize_mapping(mapping):
     """
@@ -128,7 +153,15 @@ def load_model(model_option):
             else "cpu"
         )
 
-        model = build_mobilenetv2(len(idx_to_class))
+        if config["classes"] == 38:
+            model = build_mobilenetv2(len(idx_to_class))
+        else:
+            model = get_model(
+                model_name=config["architecture"],
+                num_classes=len(idx_to_class),
+                pretrained=False,
+                freeze_backbone=False
+            )
 
         state_dict = torch.load(
             model_path,
@@ -192,12 +225,28 @@ def predict(model, image, idx_to_class, device):
 # ============================================================
 # GRAD-CAM
 # ============================================================
+def get_gradcam_target_layer(model, architecture):
+    if architecture == "MobileNetV2":
+        return model.features[-1]
 
-def generate_gradcam(model, input_tensor, pred_class_idx):
+    elif architecture == "ResNet50":
+        return model.layer4[-1]
+
+    elif architecture == "EfficientNetB0":
+        return model.features[-1]
+
+    elif architecture == "DenseNet121":
+        return model.features.denseblock4
+
+    else:
+        raise ValueError(
+            f"Unsupported Grad-CAM architecture: {architecture}"
+        )
+def generate_gradcam(model, input_tensor, pred_class_idx, architecture):
 
     model.eval()
 
-    target_layer = model.features[-1]
+    target_layer = get_gradcam_target_layer(model, architecture)
 
     activations = []
     gradients = []
@@ -281,7 +330,7 @@ def main():
         st.markdown("---")
         st.subheader("Model Information")
 
-        st.markdown(f"**Architecture:** MobileNetV2")
+        st.markdown(f"**Architecture:** {config['architecture']}")
         st.markdown(f"**Classes:** {config['classes']}")
         st.markdown(f"**Test Accuracy:** {config['accuracy']}")
         st.markdown(f"**Model:** {config['description']}")
@@ -532,7 +581,8 @@ def main():
             cam = generate_gradcam(
                 model,
                 input_tensor,
-                pred_idx
+                pred_idx,
+                config["architecture"]
             )
 
         img_resized = image.resize((IMG_SIZE, IMG_SIZE))

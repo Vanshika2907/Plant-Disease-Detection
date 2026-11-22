@@ -16,7 +16,10 @@ from src.expanded_dataset import get_expanded_dataloaders
 
 MODEL_PATH = PROJECT_ROOT / "models" / "mobilenetv2_68_best.pth"
 MAPPING_PATH = PROJECT_ROOT / "models" / "class_mapping_68.json"
-OUTPUT_DIR = PROJECT_ROOT / "outputs" / "source_wise_evaluation"
+if Path("/kaggle/working").exists():
+    OUTPUT_DIR = Path("/kaggle/working") / "outputs" / "source_wise_evaluation"
+else:
+    OUTPUT_DIR = PROJECT_ROOT / "outputs" / "source_wise_evaluation"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 BATCH_SIZE = 32

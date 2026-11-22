@@ -1,105 +1,234 @@
-"""
-Model Definitions
-"""
 
 import torch
 import torch.nn as nn
 from torchvision import models
-from src.config import NUM_CLASSES
 
 
-def get_resnet50(num_classes=NUM_CLASSES, pretrained=True, freeze_backbone=True):
-   
-    weights = models.ResNet50_Weights.DEFAULT if pretrained else None
-    model = models.resnet50(weights=weights)
+# --------------------------------------------------
+# CLASSIFIER HEAD
+# --------------------------------------------------
 
-    # Freeze backbone
-    if freeze_backbone:
-        for param in model.parameters():
-            param.requires_grad = False
-
-    # Replace final FC layer
-    in_features = model.fc.in_features  # 2048
-    model.fc = nn.Sequential(
+def build_classifier(in_features, num_classes):
+    return nn.Sequential(
         nn.Dropout(0.3),
         nn.Linear(in_features, 512),
-        nn.ReLU(inplace=True),
+        nn.ReLU(),
         nn.Dropout(0.2),
-        nn.Linear(512, num_classes),
+        nn.Linear(512, num_classes)
     )
 
-    return model
 
+# --------------------------------------------------
+# MOBILENETV2
+# --------------------------------------------------
 
-def get_mobilenetv2(num_classes=NUM_CLASSES, pretrained=True, freeze_backbone=True):
-    
-    weights = models.MobileNet_V2_Weights.DEFAULT if pretrained else None
+def get_mobilenetv2(
+    num_classes=68,
+    pretrained=True,
+    freeze_backbone=True
+):
+    weights = (
+        models.MobileNet_V2_Weights.DEFAULT
+        if pretrained else None
+    )
+
     model = models.mobilenet_v2(weights=weights)
 
-    # Freeze backbone
     if freeze_backbone:
         for param in model.parameters():
             param.requires_grad = False
 
-    # Replace classifier
-    in_features = model.classifier[1].in_features  # 1280
-    model.classifier = nn.Sequential(
-        nn.Dropout(0.3),
-        nn.Linear(in_features, 512),
-        nn.ReLU(inplace=True),
-        nn.Dropout(0.2),
-        nn.Linear(512, num_classes),
-    )
+    in_features = model.classifier[1].in_features
+    model.classifier = build_classifier(in_features, num_classes)
 
     return model
 
 
-def unfreeze_layers(model, model_name: str, num_layers: int = 2):
-    
-    if model_name == "resnet50":
-        # ResNet has layer1, layer2, layer3, layer4
-        layers = [model.layer4, model.layer3, model.layer2, model.layer1]
+# --------------------------------------------------
+# RESNET50
+# --------------------------------------------------
+
+def get_resnet50(
+    num_classes=68,
+    pretrained=True,
+    freeze_backbone=True
+):
+    weights = (
+        models.ResNet50_Weights.DEFAULT
+        if pretrained else None
+    )
+
+    model = models.resnet50(weights=weights)
+
+    if freeze_backbone:
+        for param in model.parameters():
+            param.requires_grad = False
+
+    in_features = model.fc.in_features
+    model.fc = build_classifier(in_features, num_classes)
+
+    return model
+
+
+# --------------------------------------------------
+# EFFICIENTNETB0
+# --------------------------------------------------
+
+def get_efficientnet_b0(
+    num_classes=68,
+    pretrained=True,
+    freeze_backbone=True
+):
+    weights = (
+        models.EfficientNet_B0_Weights.DEFAULT
+        if pretrained else None
+    )
+
+    model = models.efficientnet_b0(weights=weights)
+
+    if freeze_backbone:
+        for param in model.parameters():
+            param.requires_grad = False
+
+    in_features = model.classifier[1].in_features
+    model.classifier = build_classifier(in_features, num_classes)
+
+    return model
+
+
+# --------------------------------------------------
+# DENSENET121
+# --------------------------------------------------
+
+def get_densenet121(
+    num_classes=68,
+    pretrained=True,
+    freeze_backbone=True
+):
+    weights = (
+        models.DenseNet121_Weights.DEFAULT
+        if pretrained else None
+    )
+
+    model = models.densenet121(weights=weights)
+
+    if freeze_backbone:
+        for param in model.parameters():
+            param.requires_grad = False
+
+    in_features = model.classifier.in_features
+    model.classifier = build_classifier(in_features, num_classes)
+
+    return model
+
+
+# --------------------------------------------------
+# MODEL FACTORY
+# --------------------------------------------------
+
+def get_model(
+    model_name,
+    num_classes=68,
+    pretrained=True,
+    freeze_backbone=True
+):
+    model_name = model_name.lower().replace("-", "").replace("_", "")
+
+    model_builders = {
+        "mobilenetv2": get_mobilenetv2,
+        "resnet50": get_resnet50,
+        "efficientnetb0": get_efficientnet_b0,
+        "densenet121": get_densenet121
+    }
+
+    if model_name not in model_builders:
+        raise ValueError(
+            f"Unsupported model: {model_name}. "
+            f"Choose from {list(model_builders.keys())}."
+        )
+
+    return model_builders[model_name](
+        num_classes=num_classes,
+        pretrained=pretrained,
+        freeze_backbone=freeze_backbone
+    )
+
+
+# --------------------------------------------------
+# LAYER UNFREEZING
+# --------------------------------------------------
+
+def unfreeze_layers(model, model_name, num_layers=2):
+    model_name = model_name.lower().replace("-", "").replace("_", "")
+
+    # MobileNetV2: unfreeze the final feature blocks.
+    if model_name == "mobilenetv2":
+        blocks = list(model.features.children())
+
+        for block in blocks[-num_layers:]:
+            for param in block.parameters():
+                param.requires_grad = True
+
+    # EfficientNetB0: unfreeze the final feature blocks.
+    elif model_name == "efficientnetb0":
+        blocks = list(model.features.children())
+
+        for block in blocks[-num_layers:]:
+            for param in block.parameters():
+                param.requires_grad = True
+
+    # ResNet50: unfreeze layer4, then layer3, etc.
+    elif model_name == "resnet50":
+        layers = [
+            model.layer4,
+            model.layer3,
+            model.layer2,
+            model.layer1
+        ]
+
         for layer in layers[:num_layers]:
             for param in layer.parameters():
                 param.requires_grad = True
 
-    elif model_name == "mobilenetv2":
-        # MobileNetV2 has 19 inverted residual blocks in model.features
-        feature_blocks = list(model.features.children())
-        for block in feature_blocks[-num_layers:]:
-            for param in block.parameters():
+    # DenseNet121: progressively unfreeze later feature modules.
+    elif model_name == "densenet121":
+        layers = [
+            model.features.norm5,
+            model.features.denseblock4,
+            model.features.transition3,
+            model.features.denseblock3,
+            model.features.transition2,
+            model.features.denseblock2
+        ]
+
+        for layer in layers[:num_layers]:
+            for param in layer.parameters():
                 param.requires_grad = True
 
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    total = sum(p.numel() for p in model.parameters())
-    print(f"Unfroze {num_layers} layer(s) — "
-          f"trainable: {trainable:,} / {total:,} params "
-          f"({100 * trainable / total:.1f}%)")
-
-    return model
+    else:
+        raise ValueError(f"Unsupported model for fine-tuning: {model_name}")
 
 
-def get_model(model_name: str, **kwargs):
-    """Factory function to get a model by name."""
-    models_dict = {
-        "resnet50": get_resnet50,
-        "mobilenetv2": get_mobilenetv2,
-    }
-    if model_name not in models_dict:
-        raise ValueError(f"Unknown model: {model_name}. Choose from {list(models_dict.keys())}")
-    return models_dict[model_name](**kwargs)
+# --------------------------------------------------
+# MODEL SUMMARY
+# --------------------------------------------------
 
+def model_summary(model):
+    total_parameters = sum(
+        param.numel() for param in model.parameters()
+    )
 
-def model_summary(model, model_name: str):
-    """Print a summary of trainable vs frozen parameters."""
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    frozen = sum(p.numel() for p in model.parameters() if not p.requires_grad)
-    total = trainable + frozen
+    trainable_parameters = sum(
+        param.numel()
+        for param in model.parameters()
+        if param.requires_grad
+    )
 
-    print(f"\n{'=' * 50}")
-    print(f"Model: {model_name}")
-    print(f"{'=' * 50}")
-    print(f"   Total params:     {total:>12,}")
-    print(f"   Trainable params: {trainable:>12,} ({100 * trainable / total:.1f}%)")
-    print(f"   Frozen params:    {frozen:>12,} ({100 * frozen / total:.1f}%)")
-    print(f"{'=' * 50}\n")
+    print("\nMODEL SUMMARY")
+    print("------------------------------")
+    print(f"Total parameters: {total_parameters:,}")
+    print(f"Trainable parameters: {trainable_parameters:,}")
+    print(
+        f"Frozen parameters: "
+        f"{total_parameters - trainable_parameters:,}"
+    )

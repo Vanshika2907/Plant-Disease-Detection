@@ -29,7 +29,11 @@ from src.expanded_dataset import get_expanded_dataloaders
 # --------------------------------------------------
 
 MODEL_DIR = PROJECT_ROOT / "models"
-OUTPUT_DIR = PROJECT_ROOT / "outputs"
+
+if Path("/kaggle/working").exists():
+    OUTPUT_DIR = Path("/kaggle/working") / "outputs"
+else:
+    OUTPUT_DIR = PROJECT_ROOT / "outputs"
 
 MODEL_PATH = MODEL_DIR / "mobilenetv2_68_best.pth"
 MAPPING_PATH = MODEL_DIR / "class_mapping_68.json"
